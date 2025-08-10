@@ -27,7 +27,7 @@ async function apiCall(url, options = {}) {
     };
     
     try {
-        const response = await fetchv2(url, config);
+        const response = await fetchv2(url, config.headers, config.method || 'GET', config.body || null);
         if (response && response.text) {
             const text = response.text;
             console.log(`📥 API Response for ${url}, length:`, text.length);
@@ -191,7 +191,7 @@ async function extractEpisodes(url) {
                 title: ep.title || `Episode ${ep.episode_number}`
             }));
             
-            console.log(`✅ Found ${episodes.length} episodes with DanDaDan structure`);
+            console.log(`✅ Found ${episodes.length} episodes with correct structure`);
             return JSON.stringify(episodes);
         }
         
@@ -212,43 +212,7 @@ async function extractEpisodes(url) {
     }
 }
 
-// Helper function to extract slug from URL
-function extractSlugFromUrl(url) {
-    console.log('🔍 Extracting slug from URL:', url);
-    
-    // Pattern 1: /anime/slug format
-    let match = url.match(/\/anime\/([^\/\?]+)/);
-    if (match) {
-        console.log('✅ Found slug from /anime/ pattern:', match[1]);
-        return match[1];
-    }
-    
-    // Pattern 2: /show/slug format
-    match = url.match(/\/show\/([^\/\?]+)/);
-    if (match) {
-        console.log('✅ Found slug from /show/ pattern:', match[1]);
-        return match[1];
-    }
-    
-    // Pattern 3: /watch/slug/episode format  
-    match = url.match(/\/watch\/([^\/\?]+)\/\d+/);
-    if (match) {
-        console.log('✅ Found slug from /watch/ pattern:', match[1]);
-        return match[1];
-    }
-    
-    // Pattern 4: URL contains slug after domain
-    match = url.match(/kaa\.to\/([^\/\?]+)/);
-    if (match && match[1] !== 'anime' && match[1] !== 'show' && match[1] !== 'watch') {
-        console.log('✅ Found slug from direct pattern:', match[1]);
-        return match[1];
-    }
-    
-    console.log('❌ Could not extract slug from URL');
-    return null;
-}
-
-// Stream - Completamente corregido para la estructura real del sitio
+// Stream URL extraction - Con autenticación y análisis mejorado
 async function extractStreamUrl(episodeUrl) {
     console.log('🚨🚨🚨 [v11.5.13 AUTH STREAM FIX] 🚨🚨🚨');
     console.log('⚡ extractStreamUrl CALLED AT:', new Date().toISOString());
@@ -372,156 +336,40 @@ async function extractStreamUrl(episodeUrl) {
         return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
     }
 }
-        }, 'GET', null);
-        
-        const html = await response.text();
-        console.log('✅ HTML received, length:', html.length);
-        
-        // Pattern 1: Buscar videoId directamente en el HTML
-        const videoIdPatterns = [
-            /videoId["'\s]*:["'\s]*["']([a-f0-9]{24})["']/i,
-            /video[_-]?id["'\s]*:["'\s]*["']([a-f0-9]{24})["']/i,
-            /"video_id"["'\s]*:["'\s]*["']([a-f0-9]{24})["']/i,
-            /manifest\/([a-f0-9]{24})\/master\.m3u8/i,
-            /hls\.krussdomi\.com\/manifest\/([a-f0-9]{24})/i
-        ];
-        
-        for (const pattern of videoIdPatterns) {
-            const match = html.match(pattern);
-            if (match) {
-                const videoId = match[1];
-                console.log('🎯 FOUND VIDEO ID with pattern:', pattern, 'ID:', videoId);
-                const masterUrl = `https://hls.krussdomi.com/manifest/${videoId}/master.m3u8`;
-                console.log('🚀 RETURNING MASTER M3U8:', masterUrl);
-                return masterUrl;
-            }
-        }
-        
-        // Pattern 2: Buscar en todos los scripts
-        const scriptMatches = html.match(/<script[^>]*>(.*?)<\/script>/gis);
-        if (scriptMatches) {
-            for (const script of scriptMatches) {
-                // Buscar IDs hex de 24 caracteres en contexto de video
-                const contextPatterns = [
-                    /(?:video|manifest|stream|source|src)[^{}]*["']([a-f0-9]{24})["']/gi,
-                    /["']([a-f0-9]{24})["'][^{}]*(?:video|manifest|stream|m3u8)/gi,
-                    /window\.[^=]*=.*["']([a-f0-9]{24})["']/gi
-                ];
-                
-                for (const pattern of contextPatterns) {
-                    const matches = [...script.matchAll(pattern)];
-                    for (const match of matches) {
-                        const videoId = match[1];
-                        console.log('🎯 FOUND VIDEO ID in script context:', videoId);
-                        const masterUrl = `https://hls.krussdomi.com/manifest/${videoId}/master.m3u8`;
-                        console.log('🚀 RETURNING SCRIPT MASTER M3U8:', masterUrl);
-                        return masterUrl;
-                    }
-                }
-            }
-        }
-        
-        // Pattern 3: Buscar cualquier ID hex de 24 caracteres válido
-        const hexMatches = [...html.matchAll(/[a-f0-9]{24}/gi)];
-        if (hexMatches && hexMatches.length > 0) {
-            // Filtrar IDs que probablemente sean video IDs
-            const validIds = hexMatches
-                .map(match => match[0])
-                .filter(hexId => {
-                    // Evitar IDs que claramente no son de video
-                    return !html.includes(`"${hexId}":`) && 
-                           !html.includes(`${hexId}.jpg`) && 
-                           !html.includes(`${hexId}.png`) &&
-                           !html.includes(`${hexId}.css`) &&
-                           !html.includes(`${hexId}.js`);
-                })
-                .slice(0, 3); // Solo probar los primeros 3
-            
-            for (const videoId of validIds) {
-                console.log('🎯 TESTING potential video ID:', videoId);
-                const masterUrl = `https://hls.krussdomi.com/manifest/${videoId}/master.m3u8`;
-                
-                // Verificar si el manifest existe
-                try {
-                    const testResponse = await fetchv2(masterUrl, {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    }, 'HEAD', null);
-                    
-                    if (testResponse.status === 200) {
-                        console.log('✅ VERIFIED WORKING MASTER M3U8:', masterUrl);
-                        return masterUrl;
-                    }
-                } catch (testError) {
-                    console.log('❌ Failed to verify manifest for ID:', videoId);
-                }
-            }
-        }
-        
-        // STEP 3: Método alternativo - API de episodio específico
-        console.log('🔥 METHOD 2: API Episode Access');
-        try {
-            // Probar diferentes endpoints API
-            const apiUrls = [
-                `https://kaa.to/api/episode/${slug}/${episodeNum}`,
-                `https://kaa.to/api/show/${slug}/episode/${episodeNum}`,
-                `https://kaa.to/api/v2/episode/${slug}-${episodeNum}`
-            ];
-            
-            for (const apiUrl of apiUrls) {
-                try {
-                    console.log('📡 Trying API URL:', apiUrl);
-                    const apiResponse = await fetchv2(apiUrl, {
-                        'Accept': 'application/json',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Referer': 'https://kaa.to/'
-                    });
-                    
-                    const apiData = await apiResponse.json();
-                    console.log('� API Response keys:', Object.keys(apiData || {}));
-                    
-                    if (apiData) {
-                        // Buscar video_id en cualquier parte de la respuesta
-                        const findVideoId = (obj) => {
-                            if (typeof obj === 'string' && /^[a-f0-9]{24}$/.test(obj)) {
-                                return obj;
-                            }
-                            if (typeof obj === 'object' && obj !== null) {
-                                for (const [key, value] of Object.entries(obj)) {
-                                    if (key.toLowerCase().includes('video') && typeof value === 'string' && /^[a-f0-9]{24}$/.test(value)) {
-                                        return value;
-                                    }
-                                    const nested = findVideoId(value);
-                                    if (nested) return nested;
-                                }
-                            }
-                            return null;
-                        };
-                        
-                        const videoId = findVideoId(apiData);
-                        if (videoId) {
-                            console.log('🎯 FOUND VIDEO ID in API:', videoId);
-                            const masterUrl = `https://hls.krussdomi.com/manifest/${videoId}/master.m3u8`;
-                            console.log('🚀 RETURNING API MASTER M3U8:', masterUrl);
-                            return masterUrl;
-                        }
-                    }
-                } catch (apiError) {
-                    console.log('⚠️ API endpoint failed:', apiUrl, apiError.message);
-                }
-            }
-        } catch (apiError) {
-            console.log('⚠️ All API methods failed:', apiError.message);
-        }
-        
-        console.log('❌ No video streams found with any method');
-        
-    } catch (error) {
-        console.log('❌ ERROR in extractStreamUrl:', error.message);
-        console.log('📋 Error stack:', error.stack);
+
+// Helper function to extract slug from URL
+function extractSlugFromUrl(url) {
+    console.log('🔍 Extracting slug from URL:', url);
+    
+    // Pattern 1: /anime/slug format
+    let match = url.match(/\/anime\/([^\/\?]+)/);
+    if (match) {
+        console.log('✅ Found slug from /anime/ pattern:', match[1]);
+        return match[1];
     }
     
-    console.log('🔄 Returning fallback demo video');
-    return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+    // Pattern 2: /show/slug format
+    match = url.match(/\/show\/([^\/\?]+)/);
+    if (match) {
+        console.log('✅ Found slug from /show/ pattern:', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 3: Direct slug from end
+    const parts = url.split('/').filter(Boolean);
+    if (parts.length > 0) {
+        const slug = parts[parts.length - 1];
+        console.log('✅ Found slug from URL end:', slug);
+        return slug;
+    }
+    
+    console.log('❌ Could not extract slug from URL');
+    return null;
 }
 
-console.log('✅ [v11.5.12] COMPLETE MODULE LOADED - ULTIMATE FIX ALL PROBLEMS!');
+// getStreamUrl function (alias for extractStreamUrl for compatibility)
+async function getStreamUrl(episodeUrl) {
+    return await extractStreamUrl(episodeUrl);
+}
+
+console.log('✅ [v11.5.13] COMPLETE MODULE LOADED - FIXED DETAILS + STREAMS + AUTH!');
